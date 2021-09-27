@@ -2,9 +2,9 @@ import { ErrorLog, InfoLog } from "../../Functions/log";
 import { Select, SelectListener } from "./select";
 import { startLoading, stopLoading } from "../../Functions/Loading/loading";
 
-import { ContextMenu } from "../../Context Menu/contextMenu";
+import { ContextMenu } from "../../ContextMenu/contextMenu";
 import { FSWatcher } from "original-fs";
-import Home from '../../Layout/home';
+import Home from "../../../Components/Layout/home";
 import LAZY_LOAD from "../../Functions/lazyLoadingImage";
 import Recent from "../../Recent/recent";
 import changePosition from "../../Functions/changePosition";
