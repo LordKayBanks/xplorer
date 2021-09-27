@@ -1,8 +1,8 @@
-import storage from 'electron-json-storage-sync';
+import ejs from 'ejs';
 import fs from 'fs';
 import path from 'path';
 import { reload } from '../../Layout/windowManager';
-import ejs from 'ejs';
+import storage from 'electron-json-storage-sync';
 /**
  * Create preference section
  * @returns {void}

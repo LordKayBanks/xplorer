@@ -23,12 +23,17 @@
 }
 
 .file-grid {
-	display: inline-block;
+	// display: inline-block;
 	margin: 0.5rem 1rem;
 	padding: 0.5rem;
 	border-radius: 5px;
-	width: 6rem;
+	// width: 6rem;
 	cursor: pointer;
+
+	display: flex;
+	justify-content: end;
+	align-items: center;
+	column-gap: 10px;
 
 	.file-modifiedAt,
 	.file-size,
@@ -36,7 +41,7 @@
 		display: none;
 	}
 	.file-grid-preview {
-		margin: auto;
+		// margin: auto;
 		display: block;
 		max-width: 4rem;
 		height: 3rem;
@@ -49,7 +54,7 @@
 		display: -webkit-box;
 		overflow: hidden;
 		height: fit-content;
-		text-align: center;
+		// text-align: center;
 	}
 }
 
@@ -116,4 +121,8 @@
 	border: var(--selected-grid-border);
 	background: var(--selected-grid-background) !important;
 	color: var(--selected-grid-color) !important;
+}
+
+.greater-than-icon {
+	margin-left: auto;
 }

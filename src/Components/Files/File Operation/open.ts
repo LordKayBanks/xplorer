@@ -1,26 +1,27 @@
-import fileIcon from "../File Icon/fileIcon";
-import path from "path";
-import os from "os";
-import Home from '../../Layout/home';
-import changePosition from "../../Functions/changePosition";
-import { updateTheme } from "../../Theme/theme";
-import nativeDrag from "./drag";
+import { ErrorLog, InfoLog } from "../../Functions/log";
+import { Select, SelectListener } from "./select";
 import { startLoading, stopLoading } from "../../Functions/Loading/loading";
-import storage from "electron-json-storage-sync";
-import Recent from "../../Recent/recent";
-import LAZY_LOAD from "../../Functions/lazyLoadingImage";
-import fs from "fs";
-import {isHiddenFile} from "is-hidden-file";
+
 import { ContextMenu } from "../../Context Menu/contextMenu";
-import formatBytes from "../../Functions/filesize";
-import getType from "../File Type/type";
-import { SelectListener, Select } from "./select";
-import { InfoLog, ErrorLog } from "../../Functions/log";
+import { FSWatcher } from "original-fs";
+import Home from '../../Layout/home';
+import LAZY_LOAD from "../../Functions/lazyLoadingImage";
+import Recent from "../../Recent/recent";
+import changePosition from "../../Functions/changePosition";
 import { closePreviewFile } from "../File Preview/preview";
 import {dialog} from "@electron/remote";
 import type fileData from "../../../Typings/fileData";
+import fileIcon from "../File Icon/fileIcon";
+import formatBytes from "../../Functions/filesize";
+import fs from "fs";
+import getType from "../File Type/type";
 import { ipcRenderer } from "electron";
-import { FSWatcher } from "original-fs";
+import {isHiddenFile} from "is-hidden-file";
+import nativeDrag from "./drag";
+import os from "os";
+import path from "path";
+import storage from "electron-json-storage-sync";
+import { updateTheme } from "../../Theme/theme";
 
 const WINDOWS_TRASH_FILES_PATH = "C:\\Trash/files";
 const WINDOWS_TRASH_INFO_PATH = "C:\\Trash/info";
@@ -126,8 +127,13 @@ const displayFiles = async (files: fileData[], dir:string, options?: {reveal: bo
     const layout = storage.get("layout")?.data?.[dir] ?? storage.get("preference")?.data?.layout ?? "s"
     const sort = storage.get("sort")?.data?.[dir] ?? 'A'
     const MAIN_ELEMENT = document.getElementById("workspace");
-    MAIN_ELEMENT.innerHTML = "";
-    if (MAIN_ELEMENT.classList.contains('empty-dir-notification')) MAIN_ELEMENT.classList.remove('empty-dir-notification') // Remove class if exist
+
+    if (dir === "xplorer://Home") {
+        MAIN_ELEMENT.innerHTML = "";
+    }
+
+    if (MAIN_ELEMENT.classList.contains('empty-dir-notification'))
+        MAIN_ELEMENT.classList.remove('empty-dir-notification') // Remove class if exist
     files = files.sort((a, b) => {
         switch (sort) {
             case "A": // A-Z
@@ -152,11 +158,22 @@ const displayFiles = async (files: fileData[], dir:string, options?: {reveal: bo
         MAIN_ELEMENT.innerText = "This folder is empty."
         stopLoading()
     } else {
+        const fileGridContainer = document.createElement("div");
+        fileGridContainer.classList.add('sub-grid');
+        fileGridContainer.dataset.path = dir;
+
         await files.forEach(async dirent => {
             if (hideSystemFile && dirent.isSystemFile) return;
             if (IGNORE_FILE.indexOf(dirent.name) !== -1) return;
             const preview = await fileIcon(dirent.type === "Image" && dirent.isTrash ? dirent.realPath : path.join(dir, dirent.name), dirent.isDir ? "folder" : "file")
             const fileGrid = document.createElement("div")
+            fileGrid.addEventListener("click", (e)=>{
+                const target= e.target as HTMLElement;
+                const leftPosition = target.getBoundingClientRect().left;
+                document.documentElement.scrollLeft=leftPosition;
+                // target.scrollIntoView();
+            })
+
             fileGrid.className = "file-grid grid-hover-effect file"
             if (dirent.isTrash) fileGrid.dataset.isTrash = "true"
             switch (layout) {
@@ -187,14 +204,20 @@ const displayFiles = async (files: fileData[], dir:string, options?: {reveal: bo
             fileGrid.dataset.path = escape(dirent.path ?? path.join(dir, dirent.name))
             fileGrid.innerHTML = `
             ${preview}
-            <span class="file-grid-filename" id="file-filename">${dirent.name}</span><span class="file-modifiedAt" id="file-createdAt">${new Date(dirent.modifiedAt ?? dirent.trashDeletionDate).toLocaleString(navigator.language, { hour12: false })}</span>
+            <span class="file-grid-filename" id="file-filename">${dirent.name}</span>
+            <span class="file-modifiedAt" id="file-createdAt">${new Date(dirent.modifiedAt ?? dirent.trashDeletionDate).toLocaleString(navigator.language, { hour12: false })}</span>
             ${dirent.size > 0 ? `<span class="file-size" id="file-size">${formatBytes(dirent.size)}</span>` : `<span class="file-size" id="file-size"></span>`}
             <span class="file-type">${dirent.type}</span>
+            ${dirent.isDir?`<span class="greater-than-icon">></span>`:''}
             `
-            MAIN_ELEMENT.appendChild(fileGrid)
-
-            ContextMenu(fileGrid, openFileWithDefaultApp, open)
+            fileGridContainer.appendChild(fileGrid)
         })
+        MAIN_ELEMENT.appendChild(fileGridContainer);
+        const leftPosition = fileGridContainer.getBoundingClientRect().left;
+        document.documentElement.scrollLeft=leftPosition;
+        fileGridContainer.scrollIntoView()
+        ContextMenu(MAIN_ELEMENT, openFileWithDefaultApp, open)
+
         if(options?.reveal || !fs.statSync(dir)?.isDirectory()){
             Select(document.querySelector<HTMLElement>(
                 `[data-path="${escape(options?.initialDirToOpen)}"]`
@@ -213,6 +236,12 @@ const displayFiles = async (files: fileData[], dir:string, options?: {reveal: bo
     }
 }
 
+
+const isParentPath = (parentPath:string,childPath:string)=>{
+    const path = require('path');
+    const relative = path.relative(parentPath, childPath);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
 /**
  * Open a directory on Xplorer
  * @param {string} dir
@@ -235,7 +264,64 @@ const open = async (dir:string, reveal?:boolean):Promise<void> => {
     } else if ( dir === "xplorer://Recent") {
         Recent()
     } else if ( dir === "xplorer://Trash") {
-        const getFiles = () => {
+        const files = getFiles(dir)
+        displayFiles(files, process.platform === "win32" ? WINDOWS_TRASH_FILES_PATH : LINUX_TRASH_FILES_PATH)
+        // Watch the directory
+        watcher?.close()
+        fs.watch(process.platform === "win32" ? WINDOWS_TRASH_FILES_PATH : LINUX_TRASH_FILES_PATH, async () => {
+            const files = getFiles(dir)
+            // Get files of the dir
+            displayFiles(files, process.platform === "win32" ? WINDOWS_TRASH_FILES_PATH : LINUX_TRASH_FILES_PATH)
+        })
+
+    } else {
+        if(reveal || !fs.statSync(dir)?.isDirectory()){
+            dir = path.dirname(dir)
+        }
+        if (!fs.existsSync(dir)) {
+            dialog.showMessageBoxSync({ message: `Xplorer can't find '${dir}'. Check the spelling and try again.`, type: "error" })
+            ErrorLog(`${dir} does not exist.`)
+            stopLoading()
+            return;
+        }
+        const hideSystemFile = storage.get("preference")?.data?.hideSystemFiles ?? true
+        let getAttributesSync:any; //eslint-disable-line
+        if (process.platform === "win32") getAttributesSync = require("fswin").getAttributesSync; //eslint-disable-line
+
+        const commonParent = path.dirname(dir)
+        const subGrids = document.getElementsByClassName('sub-grid') ;
+        Array.from(subGrids).forEach(subGrid => {
+            const childPath = subGrid.getAttribute('data-path')
+            const isParent = isParentPath(commonParent,childPath);
+            if (isParent) {
+            subGrid.parentNode.removeChild(subGrid);
+            }
+        });
+
+        // if (dir !== "xplorer://Home") {
+        //     const subGrids= document.getElementsByClassName('sub-grid');
+        //     const lastSubGrid= subGrids[subGrids.length-1]
+        //     if (lastSubGrid) {
+        //         lastSubGrid.parentNode.removeChild(lastSubGrid);
+        //     }
+        // }
+        const files = elseGetFiles(dir,hideSystemFile,getAttributesSync)
+        displayFiles(files, dir, {reveal, initialDirToOpen})
+
+        // Watch the directory
+        watcher?.close()
+        watcher = fs.watch(dir, async (_, filePath) => {
+            // Check if the file is under operation on Xplorer
+            if(!ipcRenderer.sendSync('under-operation', path.join(dir, filePath))){
+                const files = elseGetFiles(dir,hideSystemFile,getAttributesSync)
+                // Get files of the dir
+                displayFiles(files, dir)
+            }
+        })
+    }
+}
+
+const getFiles = (dir:string,) => {
             if (process.platform === "win32") {
                 if (!fs.existsSync(WINDOWS_TRASH_FILES_PATH)) return []
                 else {
@@ -266,30 +352,9 @@ const open = async (dir:string, reveal?:boolean):Promise<void> => {
                 }
             }
         }
-        const files = getFiles()
-        displayFiles(files, process.platform === "win32" ? WINDOWS_TRASH_FILES_PATH : LINUX_TRASH_FILES_PATH)
-        // Watch the directory
-        watcher?.close()
-        fs.watch(process.platform === "win32" ? WINDOWS_TRASH_FILES_PATH : LINUX_TRASH_FILES_PATH, async () => {
-            const files = getFiles()
-            // Get files of the dir
-            displayFiles(files, process.platform === "win32" ? WINDOWS_TRASH_FILES_PATH : LINUX_TRASH_FILES_PATH)
-        })
 
-    } else {
-        if(reveal || !fs.statSync(dir)?.isDirectory()){
-            dir = path.dirname(dir)
-        }
-        if (!fs.existsSync(dir)) {
-            dialog.showMessageBoxSync({ message: `Xplorer can't find '${dir}'. Check the spelling and try again.`, type: "error" })
-            ErrorLog(`${dir} does not exist.`)
-            stopLoading()
-            return;
-        }
-        const hideSystemFile = storage.get("preference")?.data?.hideSystemFiles ?? true
-        let getAttributesSync:any; //eslint-disable-line
-        if (process.platform === "win32") getAttributesSync = require("fswin").getAttributesSync; //eslint-disable-line
-        const getFiles = () => {
+
+const elseGetFiles = (dir:string,hideSystemFile:boolean, getAttributesSync:any) => {
             return fs.readdirSync(dir, { withFileTypes: true }).map(dirent => {
                 const result:fileData = { name: dirent.name, isDir: dirent.isDirectory(), isHidden: isHiddenFile(path.join(dir, dirent.name)) }
                 const type = dirent.isDirectory() ? "File Folder" : getType(path.join(dir, dirent.name))
@@ -315,20 +380,4 @@ const open = async (dir:string, reveal?:boolean):Promise<void> => {
                 return result
             })
         }
-        const files = getFiles()
-        displayFiles(files, dir, {reveal, initialDirToOpen})
-        // Watch the directory
-        watcher?.close()
-        watcher = fs.watch(dir, async (_, filePath) => {
-            // Check if the file is under operation on Xplorer
-            if(!ipcRenderer.sendSync('under-operation', path.join(dir, filePath))){
-                const files = getFiles()
-                // Get files of the dir
-                displayFiles(files, dir)
-            }
-        })
-    }
-}
-   
-
 export { listenOpen, open, openFileWithDefaultApp, closeWatcher }
